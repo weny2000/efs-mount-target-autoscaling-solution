@@ -1,0 +1,2 @@
+# Fargate Application Dependencies
+boto3>=1.26.0

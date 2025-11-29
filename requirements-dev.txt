@@ -1,0 +1,5 @@
+# Development and Testing Dependencies
+pytest>=7.4.0
+hypothesis>=6.82.0
+boto3>=1.26.0
+moto>=4.1.0  # For mocking AWS services in tests
