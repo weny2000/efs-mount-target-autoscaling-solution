@@ -1,62 +1,62 @@
-# EFS Mount Target Auto-scaling System - アーキテクチャ説明書
+# EFS Mount Target Auto-scaling System - Architecture Documentation
 
-## 目次
+## Table of Contents
 
-1. [システム概要](#システム概要)
-2. [アーキテクチャ図](#アーキテクチャ図)
-3. [コンポーネント詳細](#コンポーネント詳細)
-4. [データフロー](#データフロー)
-5. [スケーリングメカニズム](#スケーリングメカニズム)
-6. [負荷分散戦略](#負荷分散戦略)
-7. [セキュリティアーキテクチャ](#セキュリティアーキテクチャ)
-8. [可用性と耐障害性](#可用性と耐障害性)
+1. [System Overview](#system-overview)
+2. [Architecture Diagrams](#architecture-diagrams)
+3. [Component Details](#component-details)
+4. [Data Flow](#data-flow)
+5. [Scaling Mechanism](#scaling-mechanism)
+6. [Load Balancing Strategy](#load-balancing-strategy)
+7. [Security Architecture](#security-architecture)
+8. [Availability and Fault Tolerance](#availability-and-fault-tolerance)
 
-## システム概要
+## System Overview
 
-### 課題
+### Problem Statement
 
-AWS Fargate上で大規模ファイル読み書きサービスを運用する際、単一フォルダ内のファイル数が過剰になると、以下の問題が発生します：
+When operating large-scale file read/write services on AWS Fargate, excessive file counts in a single folder cause the following issues:
 
-- **ファイル読み取り速度の低下**: 単一のEFS Mount Targetへのアクセスが集中
-- **ネットワークボトルネック**: 単一のENI（Elastic Network Interface）の帯域幅制限
-- **スケーラビリティの制約**: 水平スケーリングしてもI/O性能が向上しない
+- **Degraded file read performance**: Concentrated access to a single EFS Mount Target
+- **Network bottleneck**: Bandwidth limitations of a single ENI (Elastic Network Interface)
+- **Scalability constraints**: Horizontal scaling doesn't improve I/O performance
 
-### ソリューション
+### Solution
 
-本システムは、以下の3つの主要な戦略でこれらの課題を解決します：
+This system solves these challenges with three main strategies:
 
-1. **自動スケーリング**: ファイル数が閾値を超えた際に、自動的に新しいMount Targetを作成
-2. **ネットワークレベルの負荷分散**: 複数のMount Target（ENI）を使用してネットワーク帯域を分散
-3. **ハッシュベースルーティング**: ファイルパスのハッシュ値を使用して、アクセスを均等に分散
+1. **Auto-scaling**: Automatically creates new Mount Targets when file count exceeds threshold
+2. **Network-level load balancing**: Distributes network bandwidth using multiple Mount Targets (ENIs)
+3. **Hash-based routing**: Uses file path hash values to evenly distribute access
 
 
-## アーキテクチャ図
+## Architecture Diagrams
 
-### 全体アーキテクチャ
+### Overall Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         AWS Cloud Environment                                │
 │                                                                               │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │                    Serverless自動化レイヤー                            │ │
+│  │                    Serverless Automation Layer                         │ │
 │  │                                                                          │ │
 │  │  ┌──────────────────┐                                                   │ │
 │  │  │  EventBridge     │                                                   │ │
 │  │  │  Rule            │                                                   │ │
-│  │  │  (5分ごと実行)   │                                                   │ │
+│  │  │  (Every 5 min)   │                                                   │ │
 │  │  └────────┬─────────┘                                                   │ │
 │  │           │                                                              │ │
 │  │           ▼                                                              │ │
 │  │  ┌──────────────────────────────────────────────────────────────────┐  │ │
 │  │  │  Lambda Function (file_monitor.py)                               │  │ │
 │  │  │  ┌────────────────────────────────────────────────────────────┐  │  │ │
-│  │  │  │  1. EFSマウント & ファイル数カウント                       │  │  │ │
-│  │  │  │  2. 閾値判定 (デフォルト: 100,000ファイル)                 │  │  │ │
-│  │  │  │  3. 利用可能なサブネット検索                               │  │  │ │
-│  │  │  │  4. 新しいMount Target作成                                 │  │  │ │
-│  │  │  │  5. SSM Parameter Store更新                                │  │  │ │
-│  │  │  │  6. ECS Service強制デプロイメント                          │  │  │ │
+│  │  │  │  1. Mount EFS & Count files                               │  │  │ │
+│  │  │  │  2. Threshold check (Default: 100,000 files)              │  │  │ │
+│  │  │  │  3. Search available subnets                              │  │  │ │
+│  │  │  │  4. Create new Mount Target                               │  │  │ │
+│  │  │  │  5. Update SSM Parameter Store                            │  │  │ │
+│  │  │  │  6. Force ECS Service deployment                          │  │  │ │
 │  │  │  └────────────────────────────────────────────────────────────┘  │  │ │
 │  │  └──────────────────────────────────────────────────────────────────┘  │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
@@ -64,7 +64,7 @@ AWS Fargate上で大規模ファイル読み書きサービスを運用する際
 │                                    │                                          │
 │                                    ▼                                          │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │                    設定管理レイヤー                                     │ │
+│  │                    Configuration Management Layer                       │ │
 │  │                                                                          │ │
 │  │  ┌──────────────────────────────────────────────────────────────────┐  │ │
 │  │  │  SSM Parameter Store                                             │  │ │
@@ -88,22 +88,22 @@ AWS Fargate上で大規模ファイル読み書きサービスを運用する際
 │                                    │                                          │
 │                                    ▼                                          │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │                    アプリケーションレイヤー                             │ │
+│  │                    Application Layer                                    │ │
 │  │                                                                          │ │
 │  │  ┌──────────────────────────────────────────────────────────────────┐  │ │
 │  │  │  ECS Cluster                                                     │  │ │
 │  │  │  ┌────────────────────────────────────────────────────────────┐  │  │ │
 │  │  │  │  Fargate Tasks (app.py)                                    │  │  │ │
 │  │  │  │  ┌──────────────────────────────────────────────────────┐  │  │  │ │
-│  │  │  │  │  起動時処理:                                         │  │  │  │ │
-│  │  │  │  │  1. SSM Parameter Storeから設定取得               │  │  │  │ │
-│  │  │  │  │  2. 全Mount TargetをNFSマウント                   │  │  │  │ │
-│  │  │  │  │     /mnt/efs-0, /mnt/efs-1, /mnt/efs-2, ...       │  │  │  │ │
+│  │  │  │  │  Startup Process:                                    │  │  │  │ │
+│  │  │  │  │  1. Retrieve config from SSM Parameter Store        │  │  │  │ │
+│  │  │  │  │  2. Mount all Mount Targets via NFS                 │  │  │  │ │
+│  │  │  │  │     /mnt/efs-0, /mnt/efs-1, /mnt/efs-2, ...         │  │  │  │ │
 │  │  │  │  │                                                      │  │  │  │ │
-│  │  │  │  │  ファイルアクセス処理:                            │  │  │  │ │
-│  │  │  │  │  1. ファイルパスのハッシュ値計算                  │  │  │  │ │
-│  │  │  │  │  2. ハッシュ % Mount Target数 = インデックス      │  │  │  │ │
-│  │  │  │  │  3. 選択されたMount Target経由でアクセス          │  │  │  │ │
+│  │  │  │  │  File Access Process:                               │  │  │  │ │
+│  │  │  │  │  1. Calculate hash value of file path               │  │  │  │ │
+│  │  │  │  │  2. hash % Mount Target count = index               │  │  │  │ │
+│  │  │  │  │  3. Access via selected Mount Target                │  │  │  │ │
 │  │  │  │  └──────────────────────────────────────────────────────┘  │  │  │ │
 │  │  │  └────────────────────────────────────────────────────────────┘  │  │ │
 │  │  └──────────────────────────────────────────────────────────────────┘  │ │
@@ -112,7 +112,7 @@ AWS Fargate上で大規模ファイル読み書きサービスを運用する際
 │                                    │                                          │
 │                                    ▼                                          │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │                    ストレージレイヤー                                   │ │
+│  │                    Storage Layer                                        │ │
 │  │                                                                          │ │
 │  │  ┌──────────────────────────────────────────────────────────────────┐  │ │
 │  │  │  EFS File System (fs-xxxxxxxx)                                   │  │ │
@@ -127,7 +127,7 @@ AWS Fargate上で大規模ファイル読み書きサービスを運用する際
 │  │  │  │ AZ-1a       │  │ AZ-1c       │  │ AZ-1d       │             │  │ │
 │  │  │  └─────────────┘  └─────────────┘  └─────────────┘             │  │ │
 │  │  │                                                                    │  │ │
-│  │  │  共有ファイルシステム: /data/                                     │  │ │
+│  │  │  Shared File System: /data/                                       │  │ │
 │  │  └──────────────────────────────────────────────────────────────────┘  │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
 │                                                                               │
@@ -135,7 +135,7 @@ AWS Fargate上で大規模ファイル読み書きサービスを運用する際
 ```
 
 
-### ネットワークアーキテクチャ
+### Network Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -184,7 +184,7 @@ AWS Fargate上で大規模ファイル読み書きサービスを運用する際
 │  │  │  │              │  │ Target 3     │                             │  │  │
 │  │  │  │ ENI          │  │ ENI          │                             │  │  │
 │  │  │  └──────────────┘  └──────────────┘                             │  │  │
-│  │  │                    (自動作成)                                    │  │  │
+│  │  │                    (Auto-created)                                │  │  │
 │  │  └─────────────────────────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 │                                                                               │
@@ -192,90 +192,91 @@ AWS Fargate上で大規模ファイル読み書きサービスを運用する際
 ```
 
 
-## コンポーネント詳細
+## Component Details
 
 ### 1. EventBridge Rule
 
-**役割**: Lambda関数を定期的に実行するトリガー
+**Role**: Trigger to periodically execute Lambda function
 
-**設定**:
-- スケジュール式: `rate(5 minutes)`
-- ターゲット: Lambda関数 (file_monitor)
-- 実行間隔: 5分ごと（カスタマイズ可能）
+**Configuration**:
+- Schedule expression: `rate(5 minutes)`
+- Target: Lambda function (file_monitor)
+- Execution interval: Every 5 minutes (customizable)
 
-**動作**:
-1. 設定されたスケジュールに従ってイベントを発火
-2. Lambda関数を非同期で呼び出し
-3. 実行履歴をCloudWatch Logsに記録
+**Operation**:
+1. Fires events according to configured schedule
+2. Invokes Lambda function asynchronously
+3. Records execution history in CloudWatch Logs
 
 ---
 
 ### 2. Lambda Function (file_monitor.py)
 
-**役割**: ファイル数を監視し、必要に応じてMount Targetを自動作成
+**Role**: Monitors file count and automatically creates Mount Targets when needed
 
-**主要機能**:
+**Key Functions**:
 
-#### 2.1 ファイル数カウント
+#### 2.1 File Count
 ```python
 def count_files_in_directory(directory_path):
-    # EFSマウントポイントからファイル数をカウント
-    # ディレクトリのみを除外し、ファイルのみをカウント
+    # Count files from EFS mount point
+    # Exclude directories, count only files
 ```
 
-**プロパティ**: ファイル数カウントの正確性
-- 任意のディレクトリに対して、カウント結果は実際のファイル数と一致する
+**Property**: File count accuracy
+- For any directory, count result matches actual file count
 
-#### 2.2 閾値判定
+#### 2.2 Threshold Check
 ```python
 def check_threshold_exceeded(file_count, threshold):
-    # ファイル数が閾値を超えているかチェック
+    # Check if file count exceeds threshold
     return file_count > threshold
 ```
 
-**プロパティ**: 閾値判定の一貫性
-- 任意のファイル数と閾値の組み合わせに対して、file_count > thresholdの場合のみTrueを返す
+**Property**: Threshold check consistency
+- For any file count and threshold combination, returns True only when file_count > threshold
 
-#### 2.3 Mount Target作成
+
+#### 2.3 Mount Target Creation
 ```python
 def create_mount_target(file_system_id, subnet_id, security_group_id):
-    # 1. AWS EFS CreateMountTarget APIを呼び出し
-    # 2. Mount Targetの作成完了を待機（ポーリング）
-    # 3. 作成されたMount Target情報を返す
+    # 1. Call AWS EFS CreateMountTarget API
+    # 2. Wait for Mount Target creation completion (polling)
+    # 3. Return created Mount Target information
 ```
 
-**特徴**:
-- 最大5分間のポーリング待機
-- 10秒間隔でステータスチェック
-- エラー時の適切なハンドリング
+**Features**:
+- Maximum 5 minutes polling wait
+- Status check every 10 seconds
+- Proper error handling
 
-#### 2.4 SSM Parameter Store更新
+#### 2.4 SSM Parameter Store Update
 ```python
 def update_ssm_parameter(parameter_name, mount_targets_json):
-    # Mount Target情報をJSON形式でSSMに保存
+    # Save Mount Target information in JSON format to SSM
 ```
 
-**プロパティ**: SSM Parameter Storeの更新整合性
-- 任意のMount Targetリストに対して、保存→取得のラウンドトリップで同じデータが返される
+**Property**: SSM Parameter Store update consistency
+- For any Mount Target list, save→retrieve round-trip returns same data
 
-#### 2.5 ECS Service更新
+#### 2.5 ECS Service Update
 ```python
 def trigger_ecs_service_deployment(cluster_name, service_name):
-    # forceNewDeployment=Trueでローリングアップデートを実行
+    # Execute rolling update with forceNewDeployment=True
 ```
 
-**環境変数**:
-| 変数名 | 説明 | デフォルト値 |
-|--------|------|-------------|
-| `TARGET_DIRECTORY` | 監視対象ディレクトリ | `/data` |
-| `FILE_COUNT_THRESHOLD` | ファイル数閾値 | `100000` |
-| `EFS_FILE_SYSTEM_ID` | EFSファイルシステムID | - |
+**Environment Variables**:
+| Variable | Description | Default Value |
+|----------|-------------|---------------|
+| `TARGET_DIRECTORY` | Monitored directory | `/data` |
+| `FILE_COUNT_THRESHOLD` | File count threshold | `100000` |
+| `EFS_FILE_SYSTEM_ID` | EFS file system ID | - |
 | `VPC_ID` | VPC ID | - |
-| `SSM_PARAMETER_NAME` | SSMパラメータ名 | `/efs-mount-autoscaling/mount-targets` |
-| `ECS_CLUSTER_NAME` | ECSクラスター名 | - |
-| `ECS_SERVICE_NAME` | ECSサービス名 | - |
+| `SSM_PARAMETER_NAME` | SSM parameter name | `/efs-mount-autoscaling/mount-targets` |
+| `ECS_CLUSTER_NAME` | ECS cluster name | - |
+| `ECS_SERVICE_NAME` | ECS service name | - |
 
-**IAM権限**:
+**IAM Permissions**:
 - `elasticfilesystem:DescribeMountTargets`
 - `elasticfilesystem:CreateMountTarget`
 - `elasticfilesystem:DescribeFileSystems`
@@ -287,15 +288,16 @@ def trigger_ecs_service_deployment(cluster_name, service_name):
 - `ec2:CreateNetworkInterface`
 - `ec2:DeleteNetworkInterface`
 
+
 ---
 
 ### 3. SSM Parameter Store
 
-**役割**: Mount Target情報を保存し、Lambda関数とFargateサービス間で共有
+**Role**: Store Mount Target information and share between Lambda function and Fargate service
 
-**パラメータ名**: `/efs-mount-autoscaling/mount-targets`
+**Parameter Name**: `/efs-mount-autoscaling/mount-targets`
 
-**データ形式**:
+**Data Format**:
 ```json
 {
   "mount_targets": [
@@ -315,133 +317,135 @@ def trigger_ecs_service_deployment(cluster_name, service_name):
 }
 ```
 
-**アクセスパターン**:
-- **書き込み**: Lambda関数（新しいMount Target作成時）
-- **読み取り**: Fargateサービス（起動時）
+**Access Patterns**:
+- **Write**: Lambda function (when creating new Mount Target)
+- **Read**: Fargate service (at startup)
 
 ---
 
 ### 4. Fargate Service (app.py)
 
-**役割**: 複数のMount Targetをマウントし、ハッシュベースでファイルアクセスを分散
+**Role**: Mount multiple Mount Targets and distribute file access using hash-based routing
 
-**主要機能**:
+**Key Functions**:
 
-#### 4.1 初期化処理
+#### 4.1 Initialization
 ```python
 def initialize():
-    # 1. SSM Parameter Storeから最新のMount Target情報を取得
+    # 1. Retrieve latest Mount Target information from SSM Parameter Store
     mount_targets = get_mount_targets_from_ssm()
     
-    # 2. 各Mount TargetをNFSマウント
+    # 2. Mount each Mount Target via NFS
     successfully_mounted = mount_nfs_targets(mount_targets)
     
     return mount_targets, successfully_mounted
 ```
 
-**マウントポイント**:
+**Mount Points**:
 - `/mnt/efs-0`: Mount Target 1
 - `/mnt/efs-1`: Mount Target 2
 - `/mnt/efs-2`: Mount Target 3
 - ...
 
-#### 4.2 ハッシュベースルーティング
+
+#### 4.2 Hash-based Routing
 ```python
 def get_file_path(original_path, mount_targets):
-    # 1. ファイルパスのハッシュ値を計算（SHA256）
+    # 1. Calculate hash value of file path (SHA256)
     hash_value = hashlib.sha256(original_path.encode('utf-8')).hexdigest()
     hash_int = int(hash_value, 16)
     
-    # 2. Mount Target数でモジュロ演算
+    # 2. Modulo operation with Mount Target count
     index = hash_int % len(mount_targets)
     
-    # 3. 選択されたMount Targetのマウントポイントを使用
+    # 3. Use mount point of selected Mount Target
     mount_point = f"/mnt/efs-{index}"
     complete_path = os.path.join(mount_point, original_path)
     
     return complete_path
 ```
 
-**プロパティ**: ハッシュベースルーティングの一貫性
-- 任意のファイルパスに対して、同じファイルパスは常に同じMount Targetインデックスを返す
+**Property**: Hash-based routing consistency
+- For any file path, same file path always returns same Mount Target index
 
-**プロパティ**: ハッシュベースルーティングの分散性
-- 任意のファイルパスのセットに対して、各Mount Targetへの分散が許容範囲内である
+**Property**: Hash-based routing distribution
+- For any set of file paths, distribution to each Mount Target is within acceptable range
 
-#### 4.3 ファイルアクセスAPI
+#### 4.3 File Access API
 ```python
-# 読み取り
+# Read
 def read_file(original_path, mount_targets, mode='r', encoding='utf-8'):
     complete_path = get_file_path(original_path, mount_targets)
     with open(complete_path, mode, encoding=encoding) as f:
         return f.read()
 
-# 書き込み
+# Write
 def write_file(original_path, content, mount_targets, mode='w', encoding='utf-8'):
     complete_path = get_file_path(original_path, mount_targets)
     with open(complete_path, mode, encoding=encoding) as f:
         f.write(content)
     return complete_path
 
-# 追記
+# Append
 def append_file(original_path, content, mount_targets, encoding='utf-8'):
     # ...
 
-# 存在確認
+# Exists check
 def file_exists(original_path, mount_targets):
     # ...
 
-# 削除
+# Delete
 def delete_file(original_path, mount_targets):
     # ...
 ```
 
-**環境変数**:
-| 変数名 | 説明 |
-|--------|------|
-| `SSM_PARAMETER_NAME` | SSMパラメータ名 |
-| `EFS_FILE_SYSTEM_ID` | EFSファイルシステムID |
+**Environment Variables**:
+| Variable | Description |
+|----------|-------------|
+| `SSM_PARAMETER_NAME` | SSM parameter name |
+| `EFS_FILE_SYSTEM_ID` | EFS file system ID |
 
-**IAM権限**:
+**IAM Permissions**:
 - `ssm:GetParameter`
 - `elasticfilesystem:DescribeMountTargets`
 - `elasticfilesystem:DescribeFileSystems`
 
-**エラーハンドリング**:
-- SSM取得失敗時: デフォルト設定を使用
-- Mount失敗時: 失敗したMount Targetをスキップし、他のMount Targetを使用
+**Error Handling**:
+- SSM retrieval failure: Use default configuration
+- Mount failure: Skip failed Mount Target and use other Mount Targets
 
-**プロパティ**: Mount失敗時のフォールバック
-- 任意のMount Targetリストに対して、一部のMount Targetのマウントに失敗しても、少なくとも1つが利用可能であればサービスは起動する
+**Property**: Fallback on mount failure
+- For any Mount Target list, if some Mount Targets fail to mount but at least one is available, service starts
+
 
 ---
 
 ### 5. EFS File System
 
-**役割**: 大規模ファイルストレージを提供
+**Role**: Provide large-scale file storage
 
-**設定**:
-- **パフォーマンスモード**: General Purpose（小規模）または Max I/O（大規模）
-- **スループットモード**: Bursting（変動する負荷）または Provisioned（予測可能な負荷）
-- **暗号化**: 有効（AWS KMS使用）
-- **転送中の暗号化**: TLS有効
+**Configuration**:
+- **Performance Mode**: General Purpose (small scale) or Max I/O (large scale)
+- **Throughput Mode**: Bursting (variable load) or Provisioned (predictable load)
+- **Encryption**: Enabled (using AWS KMS)
+- **Encryption in transit**: TLS enabled
 
-**Mount Target**:
-- 各Availability Zoneに1つのMount Targetを配置
-- 各Mount Targetは専用のENI（Elastic Network Interface）を持つ
-- ENIは独立したネットワーク帯域を提供
+**Mount Targets**:
+- One Mount Target per Availability Zone
+- Each Mount Target has dedicated ENI (Elastic Network Interface)
+- ENI provides independent network bandwidth
 
-**スケーリング特性**:
-- 初期状態: 2つのMount Target（2つのAZ）
-- 自動拡張: ファイル数が閾値を超えると、新しいAZにMount Targetを追加
-- 最大数: VPC内のAZ数まで拡張可能
+**Scaling Characteristics**:
+- Initial state: 2 Mount Targets (2 AZs)
+- Auto-expansion: When file count exceeds threshold, add Mount Target in new AZ
+- Maximum: Can expand up to number of AZs in VPC
 
 ---
 
 
-## データフロー
+## Data Flow
 
-### 1. 通常運用時のデータフロー
+### 1. Normal Operation Data Flow
 
 ```
 ┌─────────────┐
@@ -449,18 +453,18 @@ def delete_file(original_path, mount_targets):
 │  Task       │
 └──────┬──────┘
        │
-       │ 1. ファイルアクセス要求
+       │ 1. File access request
        │    file_path = "user/12345/document.pdf"
        │
        ▼
 ┌──────────────────────────────────────────┐
-│  ハッシュベースルーティング              │
+│  Hash-based Routing                      │
 │  hash = SHA256(file_path)                │
 │  index = hash % num_mount_targets        │
 │  → index = 1                             │
 └──────┬───────────────────────────────────┘
        │
-       │ 2. 選択されたMount Target経由でアクセス
+       │ 2. Access via selected Mount Target
        │    /mnt/efs-1/user/12345/document.pdf
        │
        ▼
@@ -469,7 +473,7 @@ def delete_file(original_path, mount_targets):
 │  Availability Zone: ap-northeast-1c      │
 └──────┬───────────────────────────────────┘
        │
-       │ 3. NFSプロトコル経由でアクセス
+       │ 3. Access via NFS protocol
        │
        ▼
 ┌──────────────────────────────────────────┐
@@ -478,40 +482,41 @@ def delete_file(original_path, mount_targets):
 └──────────────────────────────────────────┘
 ```
 
-### 2. スケーリング時のデータフロー
+
+### 2. Scaling Data Flow
 
 ```
 ┌─────────────┐
 │ EventBridge │
-│ (5分ごと)   │
+│ (Every 5min)│
 └──────┬──────┘
        │
-       │ 1. Lambda関数を実行
+       │ 1. Execute Lambda function
        │
        ▼
 ┌──────────────────────────────────────────┐
 │  Lambda Function                         │
 │  ┌────────────────────────────────────┐  │
-│  │ Step 1: ファイル数カウント         │  │
-│  │ count = 150,000 ファイル           │  │
+│  │ Step 1: Count files                │  │
+│  │ count = 150,000 files              │  │
 │  └────────────────────────────────────┘  │
 │  ┌────────────────────────────────────┐  │
-│  │ Step 2: 閾値判定                   │  │
+│  │ Step 2: Threshold check            │  │
 │  │ 150,000 > 100,000 → TRUE           │  │
 │  └────────────────────────────────────┘  │
 │  ┌────────────────────────────────────┐  │
-│  │ Step 3: 利用可能なサブネット検索   │  │
-│  │ 既存: AZ-1a, AZ-1c                 │  │
-│  │ 利用可能: AZ-1d                    │  │
+│  │ Step 3: Search available subnets   │  │
+│  │ Existing: AZ-1a, AZ-1c             │  │
+│  │ Available: AZ-1d                   │  │
 │  └────────────────────────────────────┘  │
 │  ┌────────────────────────────────────┐  │
-│  │ Step 4: Mount Target作成           │  │
+│  │ Step 4: Create Mount Target        │  │
 │  │ CreateMountTarget(AZ-1d)           │  │
 │  │ → fsmt-new123                      │  │
 │  └────────────────────────────────────┘  │
 └──────┬───────────────────────────────────┘
        │
-       │ 2. SSM Parameter Store更新
+       │ 2. Update SSM Parameter Store
        │
        ▼
 ┌──────────────────────────────────────────┐
@@ -519,29 +524,29 @@ def delete_file(original_path, mount_targets):
 │  mount_targets: [                        │
 │    {id: fsmt-12345, ip: 10.0.1.100},     │
 │    {id: fsmt-67890, ip: 10.0.2.100},     │
-│    {id: fsmt-new123, ip: 10.0.3.100}     │ ← 新規追加
+│    {id: fsmt-new123, ip: 10.0.3.100}     │ ← Newly added
 │  ]                                       │
 └──────┬───────────────────────────────────┘
        │
-       │ 3. ECS Service強制デプロイメント
+       │ 3. Force ECS Service deployment
        │
        ▼
 ┌──────────────────────────────────────────┐
 │  ECS Service                             │
 │  ┌────────────────────────────────────┐  │
-│  │ ローリングアップデート開始         │  │
-│  │ 1. 新しいタスクを起動              │  │
-│  │ 2. 新しいタスクがSSMから設定取得   │  │
-│  │ 3. 3つのMount Targetをマウント     │  │
-│  │ 4. 古いタスクを停止                │  │
+│  │ Start rolling update               │  │
+│  │ 1. Launch new tasks                │  │
+│  │ 2. New tasks retrieve config       │  │
+│  │ 3. Mount 3 Mount Targets           │  │
+│  │ 4. Stop old tasks                  │  │
 │  └────────────────────────────────────┘  │
 └──────────────────────────────────────────┘
 ```
 
-### 3. ファイルアクセスの負荷分散
+### 3. File Access Load Balancing
 
 ```
-複数のFargateタスクからの同時アクセス:
+Concurrent access from multiple Fargate tasks:
 
 Task 1: file_a.txt → hash % 3 = 0 → Mount Target 1 (10.0.1.100)
 Task 2: file_b.txt → hash % 3 = 1 → Mount Target 2 (10.0.2.100)
@@ -549,236 +554,239 @@ Task 3: file_c.txt → hash % 3 = 2 → Mount Target 3 (10.0.3.100)
 Task 4: file_d.txt → hash % 3 = 0 → Mount Target 1 (10.0.1.100)
 Task 5: file_e.txt → hash % 3 = 1 → Mount Target 2 (10.0.2.100)
 
-結果: ネットワークトラフィックが3つのENIに分散される
+Result: Network traffic distributed across 3 ENIs
 ```
 
 
-## スケーリングメカニズム
 
-### スケーリングトリガー
+## Scaling Mechanism
 
-**条件**:
+### Scaling Trigger
+
+**Condition**:
 ```
-ファイル数 > FILE_COUNT_THRESHOLD
-```
-
-**デフォルト閾値**: 100,000ファイル
-
-**チェック頻度**: 5分ごと（EventBridgeスケジュール）
-
-### スケーリングプロセス
-
-#### Phase 1: 検出
-```
-1. EventBridgeがLambda関数を実行
-2. Lambda関数がEFSをマウント
-3. ターゲットディレクトリのファイル数をカウント
-4. 閾値と比較
+File count > FILE_COUNT_THRESHOLD
 ```
 
-#### Phase 2: 評価
+**Default Threshold**: 100,000 files
+
+**Check Frequency**: Every 5 minutes (EventBridge schedule)
+
+### Scaling Process
+
+#### Phase 1: Detection
 ```
-IF ファイル数 > 閾値 THEN
-  1. 既存のMount Targetを取得
-  2. VPC内の全サブネットを取得
-  3. Mount Targetが存在しないサブネットを特定
+1. EventBridge executes Lambda function
+2. Lambda function mounts EFS
+3. Count files in target directory
+4. Compare with threshold
+```
+
+#### Phase 2: Evaluation
+```
+IF file count > threshold THEN
+  1. Get existing Mount Targets
+  2. Get all subnets in VPC
+  3. Identify subnets without Mount Targets
   
-  IF 利用可能なサブネットが存在 THEN
-    → Phase 3へ
+  IF available subnets exist THEN
+    → Proceed to Phase 3
   ELSE
-    → ログに警告を記録して終了
+    → Log warning and exit
   END IF
 END IF
 ```
 
-#### Phase 3: 実行
+#### Phase 3: Execution
 ```
-1. 新しいMount Targetを作成
-   - CreateMountTarget API呼び出し
-   - 最大5分間、作成完了を待機
+1. Create new Mount Target
+   - Call CreateMountTarget API
+   - Wait up to 5 minutes for completion
    
-2. SSM Parameter Storeを更新
-   - 全Mount Targetのリストを取得
-   - JSON形式に変換
-   - SSMに保存
+2. Update SSM Parameter Store
+   - Retrieve all Mount Target list
+   - Convert to JSON format
+   - Save to SSM
    
-3. ECS Serviceを更新
-   - UpdateService API呼び出し（forceNewDeployment=True）
-   - ローリングアップデートが開始される
+3. Update ECS Service
+   - Call UpdateService API (forceNewDeployment=True)
+   - Rolling update starts
 ```
 
-#### Phase 4: 適用
+#### Phase 4: Application
 ```
-1. ECSが新しいFargateタスクを起動
-2. 新しいタスクがSSM Parameter Storeから最新の設定を取得
-3. 新しいタスクが全てのMount Target（新規を含む）をマウント
-4. 新しいタスクが正常に起動したら、古いタスクを停止
-5. 全てのタスクが新しい設定で動作
-```
-
-### スケーリング制約
-
-**最大Mount Target数**: VPC内のAvailability Zone数
-
-**例**: 
-- ap-northeast-1リージョン: 最大3つ（1a, 1c, 1d）
-- us-east-1リージョン: 最大6つ（1a, 1b, 1c, 1d, 1e, 1f）
-
-**スケールダウン**: 
-- 現在のバージョンでは自動スケールダウンは実装されていない
-- 手動でMount Targetを削除する必要がある
-
-### スケーリングタイムライン
-
-```
-T+0:00  EventBridgeがLambda関数を実行
-T+0:05  ファイル数カウント完了
-T+0:10  閾値超過を検出
-T+0:15  利用可能なサブネットを特定
-T+0:20  Mount Target作成開始
-T+2:00  Mount Target作成完了（平均2分）
-T+2:05  SSM Parameter Store更新完了
-T+2:10  ECS Service強制デプロイメント開始
-T+3:00  新しいFargateタスク起動開始
-T+3:30  新しいタスクが全Mount Targetをマウント
-T+4:00  新しいタスクが正常稼働
-T+4:30  古いタスクが停止
-T+5:00  ローリングアップデート完了
-
-合計所要時間: 約5分
+1. ECS launches new Fargate tasks
+2. New tasks retrieve latest config from SSM Parameter Store
+3. New tasks mount all Mount Targets (including new one)
+4. Once new tasks are healthy, stop old tasks
+5. All tasks operate with new configuration
 ```
 
+### Scaling Constraints
 
-## 負荷分散戦略
+**Maximum Mount Targets**: Number of Availability Zones in VPC
 
-### ハッシュベースルーティングの原理
+**Examples**: 
+- ap-northeast-1 region: Maximum 3 (1a, 1c, 1d)
+- us-east-1 region: Maximum 6 (1a, 1b, 1c, 1d, 1e, 1f)
 
-#### アルゴリズム
+**Scale Down**: 
+- Automatic scale down not implemented in current version
+- Manual Mount Target deletion required
+
+### Scaling Timeline
+
+```
+T+0:00  EventBridge executes Lambda function
+T+0:05  File count complete
+T+0:10  Threshold exceeded detected
+T+0:15  Available subnets identified
+T+0:20  Mount Target creation starts
+T+2:00  Mount Target creation complete (average 2 min)
+T+2:05  SSM Parameter Store update complete
+T+2:10  ECS Service force deployment starts
+T+3:00  New Fargate task launch starts
+T+3:30  New task mounts all Mount Targets
+T+4:00  New task healthy
+T+4:30  Old task stops
+T+5:00  Rolling update complete
+
+Total time: Approximately 5 minutes
+```
+
+
+
+## Load Balancing Strategy
+
+### Hash-based Routing Principles
+
+#### Algorithm
 
 ```python
 def select_mount_target(file_path, mount_targets):
-    # 1. ファイルパスからハッシュ値を計算
+    # 1. Calculate hash value from file path
     hash_value = SHA256(file_path)
     
-    # 2. ハッシュ値を整数に変換
+    # 2. Convert hash value to integer
     hash_int = int(hash_value, 16)
     
-    # 3. Mount Target数でモジュロ演算
+    # 3. Modulo operation with Mount Target count
     index = hash_int % len(mount_targets)
     
-    # 4. 選択されたMount Targetを返す
+    # 4. Return selected Mount Target
     return mount_targets[index]
 ```
 
-#### 特性
+#### Characteristics
 
-**一貫性**:
-- 同じファイルパスは常に同じMount Targetにルーティングされる
-- ファイルの読み取り・書き込み・削除が同じMount Target経由で行われる
-- キャッシュの局所性が向上
+**Consistency**:
+- Same file path always routed to same Mount Target
+- File read/write/delete operations go through same Mount Target
+- Improved cache locality
 
-**分散性**:
-- SHA256ハッシュ関数の均等分散特性により、ファイルが各Mount Targetに均等に分散される
-- 理論的には、各Mount Targetへのアクセスは1/N（NはMount Target数）
+**Distribution**:
+- SHA256 hash function's uniform distribution property distributes files evenly across Mount Targets
+- Theoretically, access to each Mount Target is 1/N (N = Mount Target count)
 
-**スケーラビリティ**:
-- Mount Targetを追加しても、既存のファイルの大部分は同じMount Targetにルーティングされる
-- 再配置が必要なファイルは約1/N（Nは新しいMount Target数）
+**Scalability**:
+- Adding Mount Targets doesn't affect routing of most existing files
+- Files requiring redistribution: approximately 1/N (N = new Mount Target count)
 
-### 負荷分散の効果
+### Load Balancing Effects
 
-#### シナリオ1: 単一Mount Target（初期状態）
+#### Scenario 1: Single Mount Target (Initial State)
 
 ```
-全てのアクセス → Mount Target 1 (ENI 1)
+All access → Mount Target 1 (ENI 1)
                   ↓
-              ボトルネック
-              - ENI帯域幅制限
-              - 単一障害点
+              Bottleneck
+              - ENI bandwidth limit
+              - Single point of failure
 ```
 
-**問題点**:
-- ENIの帯域幅制限（最大10 Gbps）
-- レイテンシの増加
-- 単一障害点
+**Issues**:
+- ENI bandwidth limit (max 10 Gbps)
+- Increased latency
+- Single point of failure
 
-#### シナリオ2: 3つのMount Target（スケーリング後）
+#### Scenario 2: 3 Mount Targets (After Scaling)
 
 ```
-ファイルA → Mount Target 1 (ENI 1) → 33%のトラフィック
-ファイルB → Mount Target 2 (ENI 2) → 33%のトラフィック
-ファイルC → Mount Target 3 (ENI 3) → 33%のトラフィック
+File A → Mount Target 1 (ENI 1) → 33% of traffic
+File B → Mount Target 2 (ENI 2) → 33% of traffic
+File C → Mount Target 3 (ENI 3) → 33% of traffic
 ```
 
-**改善点**:
-- 合計帯域幅: 最大30 Gbps（3 × 10 Gbps）
-- レイテンシの低減
-- 冗長性の向上
+**Improvements**:
+- Total bandwidth: Max 30 Gbps (3 × 10 Gbps)
+- Reduced latency
+- Improved redundancy
 
-### パフォーマンスメトリクス
+### Performance Metrics
 
-#### スループット
+#### Throughput
 
-**単一Mount Target**:
-- 読み取り: 最大 3 GB/s
-- 書き込み: 最大 1 GB/s
+**Single Mount Target**:
+- Read: Max 3 GB/s
+- Write: Max 1 GB/s
 
-**3つのMount Target**:
-- 読み取り: 最大 9 GB/s（3倍）
-- 書き込み: 最大 3 GB/s（3倍）
+**3 Mount Targets**:
+- Read: Max 9 GB/s (3x)
+- Write: Max 3 GB/s (3x)
 
 #### IOPS
 
-**単一Mount Target**:
-- 読み取り: 最大 35,000 IOPS
-- 書き込み: 最大 7,000 IOPS
+**Single Mount Target**:
+- Read: Max 35,000 IOPS
+- Write: Max 7,000 IOPS
 
-**3つのMount Target**:
-- 読み取り: 最大 105,000 IOPS（3倍）
-- 書き込み: 最大 21,000 IOPS（3倍）
+**3 Mount Targets**:
+- Read: Max 105,000 IOPS (3x)
+- Write: Max 21,000 IOPS (3x)
 
-### 負荷分散の検証
+### Load Balancing Verification
 
-#### プロパティベーステスト
+#### Property-based Testing
 
-**Property 5: ハッシュベースルーティングの一貫性**
+**Property 5: Hash-based routing consistency**
 ```python
 @given(st.text(), st.lists(st.integers()))
 def test_routing_consistency(file_path, mount_targets):
-    # 同じファイルパスに対して複数回ルーティング
+    # Route same file path multiple times
     index1 = select_mount_target_index(file_path, len(mount_targets))
     index2 = select_mount_target_index(file_path, len(mount_targets))
     index3 = select_mount_target_index(file_path, len(mount_targets))
     
-    # 全て同じインデックスを返すことを検証
+    # Verify all return same index
     assert index1 == index2 == index3
 ```
 
-**Property 6: ハッシュベースルーティングの分散性**
+**Property 6: Hash-based routing distribution**
 ```python
 @given(st.lists(st.text(), min_size=1000), st.integers(min_value=2, max_value=10))
 def test_routing_distribution(file_paths, num_mount_targets):
-    # 大量のファイルパスをルーティング
+    # Route large number of file paths
     distribution = [0] * num_mount_targets
     for path in file_paths:
         index = select_mount_target_index(path, num_mount_targets)
         distribution[index] += 1
     
-    # カイ二乗検定で均等分散を検証
+    # Verify uniform distribution with chi-square test
     expected = len(file_paths) / num_mount_targets
     chi_square = sum((observed - expected)**2 / expected 
                      for observed in distribution)
     
-    # 有意水準5%で均等分散を検証
+    # Verify uniform distribution at 5% significance level
     assert chi_square < critical_value
 ```
 
 
-## セキュリティアーキテクチャ
 
-### ネットワークセキュリティ
+## Security Architecture
 
-#### VPC設計
+### Network Security
+
+#### VPC Design
 
 ```
 VPC (10.0.0.0/16)
@@ -786,13 +794,13 @@ VPC (10.0.0.0/16)
 ├── Private Subnet 2 (10.0.2.0/24) - AZ-1c
 └── Private Subnet 3 (10.0.3.0/24) - AZ-1d
 
-特徴:
-- 全てのリソースをプライベートサブネットに配置
-- インターネットゲートウェイなし（オプション）
-- VPCエンドポイント経由でAWSサービスにアクセス
+Features:
+- All resources in private subnets
+- No Internet Gateway (optional)
+- Access AWS services via VPC endpoints
 ```
 
-#### セキュリティグループ
+#### Security Groups
 
 **Lambda Function Security Group**:
 ```
@@ -818,11 +826,11 @@ Outbound Rules:
 - All traffic denied (stateful connection only)
 ```
 
-### IAM権限
+### IAM Permissions
 
-#### Lambda実行ロール
+#### Lambda Execution Role
 
-**最小権限の原則**:
+**Principle of Least Privilege**:
 ```json
 {
   "Version": "2012-10-17",
@@ -866,9 +874,10 @@ Outbound Rules:
 }
 ```
 
-#### Fargateタスクロール
 
-**最小権限の原則**:
+#### Fargate Task Role
+
+**Principle of Least Privilege**:
 ```json
 {
   "Version": "2012-10-17",
@@ -892,85 +901,86 @@ Outbound Rules:
 }
 ```
 
-### データ暗号化
+### Data Encryption
 
-#### 保管時の暗号化
+#### Encryption at Rest
 
-**EFS暗号化**:
-- AWS KMS（Key Management Service）を使用
-- カスタマーマネージドキーまたはAWSマネージドキー
-- 全てのファイルデータとメタデータを暗号化
+**EFS Encryption**:
+- Uses AWS KMS (Key Management Service)
+- Customer-managed key or AWS-managed key
+- Encrypts all file data and metadata
 
-**SSM Parameter Store暗号化**:
-- SecureString型を使用（オプション）
-- AWS KMS暗号化
-- パラメータ値の暗号化
+**SSM Parameter Store Encryption**:
+- Uses SecureString type (optional)
+- AWS KMS encryption
+- Encrypts parameter values
 
-#### 転送中の暗号化
+#### Encryption in Transit
 
-**EFS転送中の暗号化**:
+**EFS Encryption in Transit**:
 ```python
-# NFSマウント時にTLSを有効化
+# Enable TLS when mounting NFS
 mount_command = [
     'mount',
     '-t', 'efs',
-    '-o', 'tls',  # TLS有効化
+    '-o', 'tls',  # Enable TLS
     f'{file_system_id}:/',
     mount_point
 ]
 ```
 
-**AWS API通信**:
-- 全てのAWS API呼び出しはHTTPS経由
-- TLS 1.2以上を使用
+**AWS API Communication**:
+- All AWS API calls via HTTPS
+- Uses TLS 1.2 or higher
 
-### 監査とロギング
+### Audit and Logging
 
 #### CloudWatch Logs
 
-**Lambda関数ログ**:
+**Lambda Function Logs**:
 ```
 /aws/lambda/efs-mount-autoscaling-file-monitor
-- 実行開始・終了
-- ファイル数カウント結果
-- Mount Target作成処理
-- エラー詳細
+- Execution start/end
+- File count results
+- Mount Target creation process
+- Error details
 ```
 
-**Fargateログ**:
+**Fargate Logs**:
 ```
 /ecs/efs-mount-autoscaling-fargate
-- アプリケーション起動
-- Mount処理の成功・失敗
-- ファイルアクセスログ（オプション）
+- Application startup
+- Mount process success/failure
+- File access logs (optional)
 ```
 
 #### CloudTrail
 
-**監査対象のAPI呼び出し**:
+**Audited API Calls**:
 - `elasticfilesystem:CreateMountTarget`
 - `ssm:PutParameter`
 - `ecs:UpdateService`
 - `ec2:CreateNetworkInterface`
 
-**記録される情報**:
-- 誰が（IAMユーザー/ロール）
-- いつ（タイムスタンプ）
-- 何を（API呼び出し）
-- どこから（ソースIPアドレス）
-- 結果（成功/失敗）
+**Recorded Information**:
+- Who (IAM user/role)
+- When (timestamp)
+- What (API call)
+- Where from (source IP address)
+- Result (success/failure)
 
 
-## 可用性と耐障害性
 
-### 高可用性設計
+## Availability and Fault Tolerance
 
-#### マルチAZ配置
+### High Availability Design
+
+#### Multi-AZ Deployment
 
 ```
 Availability Zone 1a:
 - Fargate Task 1
-- Lambda Function (実行時)
+- Lambda Function (at runtime)
 - EFS Mount Target 1
 
 Availability Zone 1c:
@@ -978,85 +988,86 @@ Availability Zone 1c:
 - EFS Mount Target 2
 
 Availability Zone 1d:
-- Fargate Task 3 (オプション)
-- EFS Mount Target 3 (自動作成)
+- Fargate Task 3
+- EFS Mount Target 3 (auto-created)
 ```
 
-**利点**:
-- 単一AZの障害に対する耐性
-- 複数のMount Targetによる冗長性
-- 自動フェイルオーバー
+**Benefits**:
+- Resilience against single AZ failure
+- Redundancy through multiple Mount Targets
+- Automatic failover
 
-#### EFS高可用性
+#### EFS High Availability
 
-**特性**:
-- 複数のAZにデータを自動的にレプリケート
-- 99.999999999%（11 9's）の耐久性
-- 99.99%の可用性SLA
+**Characteristics**:
+- Automatically replicates data across multiple AZs
+- 99.999999999% (11 9's) durability
+- 99.99% availability SLA
 
-**Mount Target障害時の動作**:
+**Behavior on Mount Target Failure**:
 ```
-IF Mount Target 1が障害 THEN
-  - そのMount Target経由のアクセスは失敗
-  - 他のMount Target（2, 3）は正常に動作
-  - 影響を受けるファイル: 約33%（ハッシュベースルーティング）
-  - 新しいFargateタスクは障害のあるMount Targetをスキップ
+IF Mount Target 1 fails THEN
+  - Access via that Mount Target fails
+  - Other Mount Targets (2, 3) operate normally
+  - Affected files: approximately 33% (hash-based routing)
+  - New Fargate tasks skip failed Mount Target
 END IF
 ```
 
-### エラーハンドリング
+### Error Handling
 
-#### Lambda関数のエラーハンドリング
+#### Lambda Function Error Handling
 
-**1. EFSアクセスエラー**:
+**1. EFS Access Error**:
 ```python
 try:
     file_count = count_files_in_directory(target_directory)
 except (FileNotFoundError, PermissionError) as e:
     logger.error(f"Failed to access EFS: {e}")
-    # 処理を中断し、エラーを返す
+    # Abort process and return error
     return {'statusCode': 500, 'error': str(e)}
 ```
 
-**2. 利用可能なサブネットなし**:
+**2. No Available Subnets**:
 ```python
 available_subnet = find_available_subnet(vpc_id, existing_mount_targets)
 if not available_subnet:
     logger.warning("No available subnets - all AZs have mount targets")
-    # 警告ログを記録し、正常終了
+    # Log warning and exit normally
     return {'statusCode': 200, 'message': 'No action needed'}
 ```
 
-**3. Mount Target作成失敗**:
+**3. Mount Target Creation Failure**:
 ```python
 try:
     new_mount_target = create_mount_target(...)
     if not new_mount_target:
         logger.error("Mount target creation failed")
-        # SSM更新とデプロイメントをスキップ
+        # Skip SSM update and deployment
         return {'statusCode': 500, 'error': 'Mount target creation failed'}
 except ClientError as e:
     logger.error(f"AWS API error: {e}")
-    # エラーログを記録し、既存の設定を維持
+    # Log error and maintain existing configuration
     return {'statusCode': 500, 'error': str(e)}
 ```
 
-**プロパティ**: エラー時の状態保持
-- 任意のエラー条件に対して、エラーが発生した場合でも、既存のMount Target設定は変更されず、システムは以前の状態を維持する
+**Property**: State preservation on error
+- For any error condition, existing Mount Target configuration remains unchanged and system maintains previous state
 
-#### Fargateアプリケーションのエラーハンドリング
 
-**1. SSM Parameter Store取得失敗**:
+#### Fargate Application Error Handling
+
+**1. SSM Parameter Store Retrieval Failure**:
 ```python
 try:
     mount_targets = get_mount_targets_from_ssm()
 except ClientError as e:
     logger.error(f"Failed to retrieve SSM parameter: {e}")
-    # デフォルト設定を使用してサービスを起動
+    # Use default configuration to start service
     mount_targets = get_default_mount_targets()
 ```
 
-**2. Mount Target マウント失敗**:
+**2. Mount Target Mount Failure**:
 ```python
 successfully_mounted = []
 for mount_target in mount_targets:
@@ -1065,213 +1076,206 @@ for mount_target in mount_targets:
         successfully_mounted.append(result)
     except Exception as e:
         logger.error(f"Failed to mount {mount_target['id']}: {e}")
-        # 失敗したMount Targetをスキップし、他のMount Targetを使用
+        # Skip failed Mount Target and use others
         continue
 
 if len(successfully_mounted) == 0:
     logger.error("Failed to mount any mount targets")
-    # サービス起動を中断
+    # Abort service startup
     sys.exit(1)
 ```
 
-**プロパティ**: Mount失敗時のフォールバック
-- 任意のMount Targetリストに対して、一部のMount Targetのマウントに失敗しても、少なくとも1つが利用可能であればサービスは起動する
+**Property**: Fallback on mount failure
+- For any Mount Target list, if some Mount Targets fail to mount but at least one is available, service starts
 
-### 障害復旧
+### Disaster Recovery
 
-#### シナリオ1: Lambda関数の実行失敗
+#### Scenario 1: Lambda Function Execution Failure
 
-**検出**:
-- CloudWatch Logsでエラーを確認
-- CloudWatch Alarmで通知
+**Detection**:
+- Check errors in CloudWatch Logs
+- Notification via CloudWatch Alarm
 
-**復旧**:
-- 次回のEventBridge実行（5分後）で自動的に再試行
-- 手動でLambda関数を実行して即座に復旧
+**Recovery**:
+- Automatic retry on next EventBridge execution (5 minutes later)
+- Manual Lambda function execution for immediate recovery
 
-**影響**:
-- スケーリングが遅延する可能性
-- 既存のサービスは正常に動作
+**Impact**:
+- Potential scaling delay
+- Existing service operates normally
 
-#### シナリオ2: Fargateタスクの起動失敗
+#### Scenario 2: Fargate Task Launch Failure
 
-**検出**:
-- ECS Serviceイベントログで確認
-- CloudWatch Alarmで通知
+**Detection**:
+- Check ECS Service event logs
+- Notification via CloudWatch Alarm
 
-**復旧**:
-- ECSが自動的に新しいタスクを起動
-- Deployment Circuit Breakerが有効な場合、自動ロールバック
+**Recovery**:
+- ECS automatically launches new task
+- Automatic rollback if Deployment Circuit Breaker enabled
 
-**影響**:
-- 一時的なサービス容量の低下
-- ローリングアップデートの遅延
+**Impact**:
+- Temporary service capacity reduction
+- Rolling update delay
 
-#### シナリオ3: EFS Mount Targetの障害
+#### Scenario 3: EFS Mount Target Failure
 
-**検出**:
-- NFSマウントエラー
-- CloudWatch Metricsで異常を検出
+**Detection**:
+- NFS mount errors
+- Anomaly detection in CloudWatch Metrics
 
-**復旧**:
-- AWSが自動的にMount Targetを復旧
-- 復旧まで他のMount Targetを使用
+**Recovery**:
+- AWS automatically recovers Mount Target
+- Use other Mount Targets until recovery
 
-**影響**:
-- 障害のあるMount Target経由のファイルアクセスが失敗
-- 約1/N（NはMount Target数）のファイルが影響を受ける
+**Impact**:
+- File access via failed Mount Target fails
+- Approximately 1/N (N = Mount Target count) of files affected
 
-### 監視とアラート
+
+### Monitoring and Alerting
 
 #### CloudWatch Metrics
 
-**Lambda関数**:
-- `Invocations`: 実行回数
-- `Errors`: エラー回数
-- `Duration`: 実行時間
-- カスタムメトリクス: ファイル数、閾値超過回数
+**Lambda Function**:
+- `Invocations`: Execution count
+- `Errors`: Error count
+- `Duration`: Execution time
+- Custom metrics: File count, threshold exceeded count
 
 **EFS**:
-- `ClientConnections`: Mount Targetへの接続数
-- `DataReadIOBytes`: 読み取りバイト数
-- `DataWriteIOBytes`: 書き込みバイト数
-- `PercentIOLimit`: I/O制限の使用率
+- `ClientConnections`: Connections to Mount Target
+- `DataReadIOBytes`: Read bytes
+- `DataWriteIOBytes`: Write bytes
+- `PercentIOLimit`: I/O limit usage percentage
 
 **Fargate**:
-- `CPUUtilization`: CPU使用率
-- `MemoryUtilization`: メモリ使用率
+- `CPUUtilization`: CPU usage
+- `MemoryUtilization`: Memory usage
 
 #### CloudWatch Alarms
 
-**推奨アラーム**:
+**Recommended Alarms**:
 ```
-1. Lambda関数のエラー率 > 10%
-   → SNS通知 → 運用チームに通知
+1. Lambda function error rate > 10%
+   → SNS notification → Notify operations team
 
 2. EFS PercentIOLimit > 80%
-   → SNS通知 → パフォーマンスモード変更を検討
+   → SNS notification → Consider performance mode change
 
-3. Fargateタスクの起動失敗
-   → SNS通知 → 設定を確認
+3. Fargate task launch failure
+   → SNS notification → Check configuration
 
-4. Mount Target作成失敗
-   → SNS通知 → VPC設定を確認
+4. Mount Target creation failure
+   → SNS notification → Check VPC configuration
 ```
 
-### バックアップと災害復旧
+### Backup and Disaster Recovery
 
-#### EFSバックアップ
+#### EFS Backup
 
-**AWS Backup統合**:
+**AWS Backup Integration**:
 ```
-バックアップ計画:
-- 頻度: 毎日
-- 保持期間: 30日
-- バックアップウィンドウ: 深夜（負荷が低い時間帯）
+Backup Plan:
+- Frequency: Daily
+- Retention: 30 days
+- Backup window: Midnight (low load period)
 ```
 
-**リストア手順**:
-1. AWS Backupコンソールから復元ポイントを選択
-2. 新しいEFSファイルシステムとして復元
-3. Mount Targetを作成
-4. SSM Parameter Storeを更新
-5. ECS Serviceを更新
+**Restore Procedure**:
+1. Select restore point from AWS Backup console
+2. Restore as new EFS file system
+3. Create Mount Targets
+4. Update SSM Parameter Store
+5. Update ECS Service
 
-#### 災害復旧計画
+#### Disaster Recovery Plan
 
-**RTO（Recovery Time Objective）**: 1時間
-**RPO（Recovery Point Objective）**: 24時間
+**RTO (Recovery Time Objective)**: 1 hour
+**RPO (Recovery Point Objective)**: 24 hours
 
-**復旧手順**:
-1. バックアップから新しいEFSファイルシステムを復元（30分）
-2. Terraformで新しいインフラをデプロイ（15分）
-3. アプリケーションの動作確認（15分）
+**Recovery Procedure**:
+1. Restore new EFS file system from backup (30 min)
+2. Deploy new infrastructure with Terraform (15 min)
+3. Verify application operation (15 min)
 
 
-## まとめ
 
-### システムの主要な特徴
+## Summary
 
-1. **自動スケーリング**
-   - ファイル数が閾値を超えた際に、自動的に新しいMount Targetを作成
-   - 手動介入不要で、システムが自律的にスケーリング
+### Key System Features
 
-2. **ネットワークレベルの負荷分散**
-   - 複数のMount Target（ENI）を使用してネットワーク帯域を分散
-   - 理論的には、Mount Target数に比例してスループットが向上
+1. **Auto-scaling**
+   - Automatically creates new Mount Targets when file count exceeds threshold
+   - No manual intervention required, system scales autonomously
 
-3. **ハッシュベースルーティング**
-   - ファイルパスのハッシュ値を使用して、アクセスを均等に分散
-   - 一貫性と分散性を両立
+2. **Network-level Load Balancing**
+   - Distributes network bandwidth using multiple Mount Targets (ENIs)
+   - Theoretically, throughput improves proportionally to Mount Target count
 
-4. **高可用性**
-   - マルチAZ配置による冗長性
-   - 障害時の自動フェイルオーバー
+3. **Hash-based Routing**
+   - Uses file path hash values to evenly distribute access
+   - Balances consistency and distribution
 
-5. **セキュリティ**
-   - 最小権限の原則に基づくIAM権限
-   - 保管時・転送中の暗号化
-   - プライベートサブネットへの配置
+4. **High Availability**
+   - Redundancy through multi-AZ deployment
+   - Automatic failover on failure
 
-### パフォーマンス改善
+5. **Security**
+   - IAM permissions based on principle of least privilege
+   - Encryption at rest and in transit
+   - Deployment in private subnets
 
-**スケーリング前（単一Mount Target）**:
-- スループット: 最大 3 GB/s（読み取り）
-- IOPS: 最大 35,000 IOPS（読み取り）
-- ボトルネック: 単一ENIの帯域幅制限
+### Performance Improvements
 
-**スケーリング後（3つのMount Target）**:
-- スループット: 最大 9 GB/s（読み取り）→ **3倍向上**
-- IOPS: 最大 105,000 IOPS（読み取り）→ **3倍向上**
-- ボトルネック: 解消
+**Before Scaling (Single Mount Target)**:
+- Throughput: Max 3 GB/s (read)
+- IOPS: Max 35,000 IOPS (read)
+- Bottleneck: Single ENI bandwidth limit
 
-### 運用上の利点
+**After Scaling (3 Mount Targets)**:
+- Throughput: Max 9 GB/s (read) → **3x improvement**
+- IOPS: Max 105,000 IOPS (read) → **3x improvement**
+- Bottleneck: Resolved
 
-1. **自動化**
-   - 手動でのMount Target作成が不要
-   - 設定変更の自動適用
+### Operational Benefits
 
-2. **可視性**
-   - CloudWatch Logsで全ての操作を記録
-   - CloudWatch Metricsでパフォーマンスを監視
+1. **Automation**
+   - No manual Mount Target creation required
+   - Automatic configuration change application
 
-3. **柔軟性**
-   - 閾値やスケジュールをカスタマイズ可能
-   - 環境変数で簡単に設定変更
+2. **Visibility**
+   - All operations recorded in CloudWatch Logs
+   - Performance monitoring via CloudWatch Metrics
 
-4. **信頼性**
-   - エラーハンドリングによる堅牢性
-   - プロパティベーステストによる品質保証
+3. **Flexibility**
+   - Customizable thresholds and schedules
+   - Easy configuration changes via environment variables
 
-### 今後の拡張可能性
+4. **Reliability**
+   - Robustness through error handling
+   - Quality assurance via property-based testing
 
-1. **自動スケールダウン**
-   - ファイル数が減少した際に、不要なMount Targetを自動削除
-   - コスト最適化
+### Future Extensibility
 
-2. **動的閾値調整**
-   - 過去のトレンドに基づいて閾値を自動調整
-   - 機械学習による予測
+1. **Auto Scale-down**
+   - Automatically delete unnecessary Mount Targets when file count decreases
+   - Cost optimization
 
-3. **クロスリージョン対応**
-   - 複数のリージョンにまたがるEFSレプリケーション
-   - グローバルな負荷分散
+2. **Dynamic Threshold Adjustment**
+   - Automatically adjust thresholds based on historical trends
+   - Machine learning-based prediction
 
-4. **高度な負荷分散**
-   - 実際のアクセスパターンに基づく動的ルーティング
-   - ホットスポットの検出と回避
+3. **Cross-region Support**
+   - EFS replication across multiple regions
+   - Global load balancing
 
-### 参考資料
+4. **Advanced Load Balancing**
+   - Dynamic routing based on actual access patterns
+   - Hot spot detection and avoidance
+
+### References
 
 - [AWS EFS Documentation](https://docs.aws.amazon.com/efs/)
 - [AWS Lambda Documentation](https://docs.aws.amazon.com/lambda/)
 - [AWS Fargate Documentation](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)
-- [設計書](.kiro/specs/efs-mount-target-autoscaling/design.md)
-- [要件定義](.kiro/specs/efs-mount-target-autoscaling/requirements.md)
-- [実装計画](.kiro/specs/efs-mount-target-autoscaling/tasks.md)
-
----
-
-**最終更新日**: 2024年11月29日  
-**バージョン**: 1.0  
-**作成者**: Kiro AI Assistant
